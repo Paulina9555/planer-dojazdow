@@ -39,7 +39,20 @@ def load_data():
 
 # --- INICJALIZACJA DANYCH ---
 if "db" not in st.session_state:
-    st.session_state.db = load_data()
+    loaded_db = load_data()
+    # Jeśli baza jest pusta, stwórz szkielet, aby uniknąć KeyError
+    if loaded_db.empty:
+        st.session_state.db = pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
+    else:
+        st.session_state.db = loaded_db
+
+db = st.session_state.db
+
+# Bezpieczne filtrowanie - sprawdź czy kolumna istnieje
+if not db.empty and "Data_Week" in db.columns:
+    current_week_df = db[db['Data_Week'] == start_monday_str]
+else:
+    current_week_df = pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
 # Przygotowanie widoku dla bieżącego tygodnia
 db = st.session_state.db
@@ -98,6 +111,7 @@ if not st.session_state.db.empty:
         color=alt.value("#1f77b4")
     ).properties(height=300)
     st.altair_chart(chart, use_container_width=True)
+
 
 
 
