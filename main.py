@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from streamlit_gsheets import GSheetsConnection
+import requests
 import altair as alt
 
 # KONFIGURACJA
@@ -9,7 +9,7 @@ OSOBY = ["Błażej", "Krzyztof", "Magda", "Norbert", "Paulina", "Przemek"]
 OPCJE = ["?", "pasażer", "kierowca", "nie jadę"]
 PUNKTY = {"pasażer": 1, "kierowca": 2, "nie jadę": 0, "?": 0}
 
-conn = st.connection("gsheets", type=GSheetsConnection)
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyZDyJOQ--kF__8RZmjP_Qh82_sAhnZkklJX4-bQwRmlkt4KtMtREZLQLZf9i0RBYde/exec"
 
 st.set_page_config(page_title="Planer Dojazdów", layout="wide")
 
@@ -37,25 +37,41 @@ def load_data():
     except:
         return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
+def save_to_sheets(df):
+    try:
+        # Konwertujemy DataFrame na listę słowników (format JSON)
+        # Zamieniamy daty na tekst, żeby JSON się nie wywalił
+        data = df.copy()
+        for col in data.select_dtypes(include=['datetime64', 'datetimetz']).columns:
+            data[col] = data[col].astype(str)
+            
+        json_payload = json.dumps(data.to_dict(orient='records'))
+        
+        # Wysyłamy dane (allow_redirects=True jest KLUCZOWE dla Google)
+        with st.spinner('Trwa zapisywanie do Google Sheets...'):
+            response = requests.post(
+                APPS_SCRIPT_URL, 
+                data=json_payload,
+                headers={"Content-Type": "application/json"},
+                allow_redirects=True
+            )
+        
+        if response.status_code == 200:
+            st.success("✅ Sukces! Dane zostały zapisane w arkuszu.")
+        else:
+            st.error(f"❌ Błąd serwera Google: {response.status_code}")
+            st.info("Upewnij się, że wdrożenie w Apps Script ma dostęp dla: 'Każdy' (Anyone).")
+            
+    except Exception as e:
+        st.error(f"⚠️ Wystąpił błąd podczas wysyłki: {e}")
 
-def save_to_sheets(df_current, full_history):
-    # Czyścimy stare wpisy dla tego tygodnia
-    updated_history = full_history[full_history['Data_Week'] != start_monday_str]
-
-    new_rows = []
-    for day in df_current.index:
-        for osoba in OSOBY:
-            new_rows.append({
-                "Data_Week": start_monday_str,
-                "Dzien": day,
-                "Osoba": osoba,
-                "Wybor": df_current.at[day, osoba]
-            })
-
-    final_df = pd.concat([updated_history, pd.DataFrame(new_rows)], ignore_index=True)
-    conn.update(data=final_df)
-    st.cache_data.clear()
-
+# 2. Przycisk wywołujący zapis (umieść go pod st.data_editor)
+if st.button("💾 Zapisz zmiany w arkuszu"):
+    # Zakładam, że 'edited_df' to nazwa Twojej zmiennej z edytowalną tabelą
+    if 'edited_df' in locals() or 'edited_df' in globals():
+        save_to_sheets(edited_df)
+    else:
+        st.warning("Nie znaleziono danych do zapisania (zmienna edited_df nie istnieje).")
 
 # SESJA I INTERFEJS
 db = load_data()
@@ -128,3 +144,4 @@ with col2:
     ).properties(height=300)
 
     st.altair_chart(chart2, use_container_width=True)
+
