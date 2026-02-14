@@ -97,31 +97,35 @@ if not db.empty:
     st.divider()
     stats = db.copy()
     stats['Pkt'] = stats['Wybor'].map(PUNKTY)
+    
+    # Przygotowanie danych do rankingu
     total_points = stats.groupby('Osoba')['Pkt'].sum().reindex(OSOBY, fill_value=0).reset_index()
     total_points.columns = ['Osoba', 'Punkty']
 
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("Ranking Punktowy")
         chart1 = alt.Chart(total_points).mark_bar().encode(
-            x=alt.X('Osoba:N', sort='-y'),
-            y='Punkty:Q',
+            x=alt.X('Osoba:N', sort=None, title=None), # Usunięto tytuł "Osoba"
+            y=alt.Y('Punkty:Q', title=None),           # Usunięto tytuł "Punkty"
             color=alt.value("#1f77b4")
         ).properties(height=300)
         st.altair_chart(chart1, use_container_width=True)
 
     with col2:
         st.subheader("Licznik roli 'Kierowca'")
+        # Licznik kierowców
         driver_counts = db[db['Wybor'] == "kierowca"].groupby('Osoba').size().reindex(OSOBY, fill_value=0).reset_index()
         driver_counts.columns = ['Osoba', 'Ilość']
+        
         chart2 = alt.Chart(driver_counts).mark_bar().encode(
-            x=alt.X('Osoba:N', sort='-y'),
-            y='Ilość:Q',
+            x=alt.X('Osoba:N', sort=None, title=None), # Usunięto tytuł "Osoba"
+            y=alt.Y('Ilość:Q', title=None),           # Usunięto tytuł "Ilość"
             color=alt.value("#ff7f0e")
         ).properties(height=300)
         st.altair_chart(chart2, use_container_width=True)
 
-    st.altair_chart(chart2, use_container_width=True)
 
 
 
