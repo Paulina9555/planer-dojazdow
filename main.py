@@ -29,8 +29,9 @@ dni_tygodnia = [(start_monday + timedelta(days=i)).strftime('%Y-%m-%d (%A)') for
 # FUNKCJA POBIERANIA
 def load_data():
     try:
+        # Dodanie timestampu do URL zapobiega problemom na telefonach
         url = f"{APPS_SCRIPT_URL}?t={datetime.now().timestamp()}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, allow_redirects=True)
         if response.status_code == 200:
             data = response.json()
             df = pd.DataFrame(data)
@@ -38,52 +39,32 @@ def load_data():
                 df.columns = df.columns.str.strip()
                 return df
     except Exception as e:
-        st.error(f"Błąd pobierania: {e}")
+        st.error(f"Błąd połączenia z bazą: {e}")
+    # Zwraca pusty DataFrame ze strukturą, jeśli baza nie odpowie
     return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
-# Załaduj dane zawsze na początku
+# 2. INICJALIZACJA I POBIERANIE DANYCH
+# Pobieramy dane bezpośrednio do zmiennej lokalnej przy każdym uruchomieniu skryptu
 db = load_data()
 
-# Filtrowanie na obecny tydzień
+# 3. FILTROWANIE I BUDOWANIE TABELI
 current_week_data = db[db['Data_Week'].astype(str) == start_monday_str]
 
-# BUDOWANIE TABELI
 if not current_week_data.empty:
+    # Usuwamy duplikaty, by pivot się nie wywalił
     clean_data = current_week_data.drop_duplicates(subset=['Dzien', 'Osoba'], keep='last')
     df_display = clean_data.pivot(index='Dzien', columns='Osoba', values='Wybor')
     df_display = df_display.reindex(index=dni_tygodnia, columns=OSOBY, fill_value="?")
 else:
     df_display = pd.DataFrame("?", index=dni_tygodnia, columns=OSOBY)
 
-# INTERFEJS
-st.title("🚗 Planer Dojazdów")
-
-edited_df = st.data_editor(
-    df_display,
-    column_config={osoba: st.column_config.SelectboxColumn(options=OPCJE) for osoba in OSOBY},
-    use_container_width=True
-)
-
-if st.button("💾 Zapisz i odśwież"):
-    # Przygotowanie danych do zapisu
-    temp_df = edited_df.reset_index().rename(columns={'index': 'Dzien'})
-    new_entries = temp_df.melt(id_vars=['Dzien'], var_name='Osoba', value_name='Wybor')
-    new_entries['Data_Week'] = start_monday_str
-    
-    # Wysyłamy tylko dane z tego tygodnia do synchronizacji
-    payload = {"week": start_monday_str, "data": new_entries.to_dict(orient='records')}
-    
-    res = requests.post(APPS_SCRIPT_URL, data=json.dumps(payload))
-    if res.status_code == 200:
-        st.cache_data.clear() # Czyścimy cache Streamlit
-        st.success("✅ Zsynchronizowano!")
-        st.rerun() # Wymuszamy przeładowanie całego skryptu
-
 # --- STATYSTYKI (na podstawie całej bazy db) ---
-if not st.session_state.db.empty:
+if db is not None and not db.empty:
     st.divider()
-    all_data = st.session_state.db.copy()
-    all_data['Pkt'] = all_data['Wybor'].map(PUNKTY).fillna(0)
+    stats_df = db.copy()
+    # Upewnij się, że kolumna istnieje przed mapowaniem
+    if 'Wybor' in stats_df.columns:
+        stats_df['Pkt'] = stats_df['Wybor'].map(PUNKTY).fillna(0)
     
     stats = all_data.groupby('Osoba')['Pkt'].sum().reindex(OSOBY, fill_value=0).reset_index()
     
@@ -93,6 +74,7 @@ if not st.session_state.db.empty:
         color=alt.value("#1f77b4")
     ).properties(height=300)
     st.altair_chart(chart, use_container_width=True)
+
 
 
 
