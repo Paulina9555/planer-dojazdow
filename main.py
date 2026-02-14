@@ -45,6 +45,25 @@ def load_data():
         st.error(f"Błąd połączenia z bazą: {e}")
     return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
+def save_to_sheets(edited_df, full_db): # Funkcja musi być TUTAJ
+    try:
+        temp_df = edited_df.reset_index().rename(columns={'index': 'Dzien'})
+        new_entries = temp_df.melt(id_vars=['Dzien'], var_name='Osoba', value_name='Wybor')
+        new_entries['Data_Week'] = start_monday_str
+        
+        if not full_db.empty:
+            full_db = full_db[full_db['Data_Week'] != start_monday_str]
+        
+        updated_db = pd.concat([full_db, new_entries], ignore_index=True)
+        json_payload = json.dumps(updated_db.to_dict(orient='records'))
+        
+        response = requests.post(APPS_SCRIPT_URL, data=json_payload, allow_redirects=True)
+        if response.status_code == 200:
+            st.success("✅ Zapisano!")
+            st.rerun()
+    except Exception as e:
+        st.error(f"Błąd: {e}")
+
 # --- POCZĄTEK LOGIKI INTERFEJSU ---
 db = load_data()
 
@@ -110,6 +129,7 @@ if not db.empty:
             color=alt.value("#ff7f0e")
         ).properties(height=300)
         st.altair_chart(chart2, use_container_width=True)
+
 
 
 
