@@ -29,18 +29,28 @@ dni_tygodnia = [(start_monday + timedelta(days=i)).strftime('%Y-%m-%d (%A)') for
 # --- KOMUNIKACJA Z GOOGLE SHEETS ---
 def load_data():
     try:
-        # t=timestamp zapobiega cache'owaniu starych danych przez telefony i Google
         url = f"{APPS_SCRIPT_URL}?t={datetime.now().timestamp()}"
         response = requests.get(url, allow_redirects=True, timeout=15)
-        if response.status_code == 200:
+        
+        # Jeśli Google zwróci błąd 401/404/500
+        if response.status_code != 200:
+            st.error(f"Google zwrócił błąd HTTP: {response.status_code}")
+            return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
+
+        # Próba odczytu JSON
+        try:
             data = response.json()
             df = pd.DataFrame(data)
             if not df.empty:
                 df.columns = df.columns.str.strip()
                 return df
+        except Exception:
+            # Jeśli to nie JSON, pokaż co to jest (np. błąd HTML)
+            st.warning("Otrzymano nieprawidłowy format danych z Google. Sprawdź wdrożenie skryptu.")
+            # st.write(response.text) # Opcjonalnie: odkomentuj, żeby zobaczyć treść błędu
+            
     except Exception as e:
-        st.error(f"Błąd połączenia z bazą danych: {e}")
-    # Zwraca pusty szkielet, aby uniknąć błędów KeyError/NameError
+        st.error(f"Błąd połączenia: {e}")
     return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
 # --- GŁÓWNA LOGIKA DANYCH ---
@@ -125,6 +135,7 @@ if not db.empty and 'Wybor' in db.columns:
             color=alt.value("#ff7f0e")
         ).properties(height=300)
         st.altair_chart(chart2, use_container_width=True)
+
 
 
 
