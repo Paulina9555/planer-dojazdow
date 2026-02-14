@@ -1,6 +1,6 @@
 streamlit
 pandas
-gspread
-
+requests
 altair
+
 
