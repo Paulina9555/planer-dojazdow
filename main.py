@@ -111,7 +111,7 @@ edited_df = st.data_editor(
 )
 
 if st.button("Zapisz zmiany"):
-    save_to_sheets(edited_df, db)
+    save_to_sheets(edited_df)
     st.rerun()
 
 # WYKRESY
@@ -144,4 +144,5 @@ with col2:
     ).properties(height=300)
 
     st.altair_chart(chart2, use_container_width=True)
+
 
