@@ -9,7 +9,7 @@ import altair as alt
 OSOBY = ["Błażej", "Krzyztof", "Magda", "Norbert", "Paulina", "Przemek"]
 OPCJE = ["?", "pasażer", "kierowca", "nie jadę"]
 PUNKTY = {"pasażer": 1, "kierowca": 2, "nie jadę": 0, "?": 0}
-APPS_SCRIPT_URL = "TWOJ_URL_APPS_SCRIPT"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyZDyJOQ--kF__8RZmjP_Qh82_sAhnZkklJX4-bQwRmlkt4KtMtREZLQLZf9i0RBYde/exec"
 
 st.set_page_config(page_title="Planer Dojazdów", layout="wide")
 
@@ -98,6 +98,7 @@ if not st.session_state.db.empty:
         color=alt.value("#1f77b4")
     ).properties(height=300)
     st.altair_chart(chart, use_container_width=True)
+
 
 
 
