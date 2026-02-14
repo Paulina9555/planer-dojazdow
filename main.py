@@ -28,72 +28,56 @@ start_monday_str = start_monday.strftime('%Y-%m-%d')
 dni_tygodnia = [(start_monday + timedelta(days=i)).strftime('%Y-%m-%d (%A)') for i in range(5)]
 
 # ODCZYT I ZAPIS GOOGLE SHEETS
-@st.cache_data(ttl=0) # ttl=0 wymusza pobranie świeżych danych przy każdym odświeżeniu
 def load_data():
     try:
-        # Pobieranie danych przez doGet z Apps Script
-        response = requests.get(APPS_SCRIPT_URL, timeout=10)
+        # KLUCZOWA POPRAWKA: allow_redirects=True jest niezbędne dla doGet
+        response = requests.get(APPS_SCRIPT_URL, allow_redirects=True, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if not data or len(data) == 0:
                 return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
+            
             df = pd.DataFrame(data)
-            # Usuwamy ewentualne białe znaki z nazw kolumn i wartości
+            # Standaryzacja nazw kolumn (usuwanie spacji i ujednolicenie wielkości liter)
             df.columns = df.columns.str.strip()
             return df
     except Exception as e:
-        st.warning(f"Nie udało się pobrać danych z Google Sheets (używam pustej tabeli).")
+        st.error(f"Błąd połączenia z bazą: {e}")
     return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
-def save_to_sheets(edited_df, full_db):
-    try:
-        # 1. Przekształcenie widoku tabeli na format bazy danych (long format)
-        temp_df = edited_df.reset_index().rename(columns={'index': 'Dzien'})
-        new_entries = temp_df.melt(id_vars=['Dzien'], var_name='Osoba', value_name='Wybor')
-        new_entries['Data_Week'] = start_monday_str
-        
-        # 2. Łączenie z historią: zachowujemy inne tygodnie, nadpisujemy bieżący
-        if not full_db.empty:
-            full_db = full_db[full_db['Data_Week'] != start_monday_str]
-        updated_db = pd.concat([full_db, new_entries], ignore_index=True)
-        
-        # 3. Wysyłka do Google przez doPost
-        json_payload = json.dumps(updated_db.to_dict(orient='records'))
-        with st.spinner('Zapisywanie danych...'):
-            response = requests.post(APPS_SCRIPT_URL, data=json_payload)
-        
-        if response.status_code == 200:
-            st.cache_data.clear() # Czyścimy cache po zapisie
-            st.success("✅ Zapisano pomyślnie!")
-            st.rerun()
-    except Exception as e:
-        st.error(f"Błąd zapisu: {e}")
-
-# --- GŁÓWNA LOGIKA APLIKACJI ---
+# --- POCZĄTEK LOGIKI INTERFEJSU ---
 db = load_data()
 
 # Filtrowanie danych na obecny tydzień
-current_week_data = db[db['Data_Week'] == start_monday_str]
+current_week_data = db[db['Data_Week'].astype(str) == start_monday_str]
 
 if current_week_data.empty:
     df_display = pd.DataFrame("?", index=dni_tygodnia, columns=OSOBY)
 else:
-    # Odbudowanie tabeli z bazy danych
+    # Odbudowanie widoku tabeli
     df_display = current_week_data.pivot(index='Dzien', columns='Osoba', values='Wybor')
+    # Reindexacja, aby zachować kolejność dni i osób, nawet jeśli brakuje danych w Sheets
     df_display = df_display.reindex(index=dni_tygodnia, columns=OSOBY, fill_value="?")
 
 st.title("🚗 Planer Dojazdów")
+st.subheader(f"Plan na tydzień: {dni_tygodnia[0]} do {dni_tygodnia[-1]}")
 
-# Używamy 'key' w data_editor, aby Streamlit śledził stan widżetu
+# DATA EDITOR
+# Używamy st.session_state, aby tabela nie czyściła się podczas klikania innych elementów
+if "editor_key" not in st.session_state:
+    st.session_state.editor_key = 0
+
 edited_df = st.data_editor(
     df_display,
     column_config={osoba: st.column_config.SelectboxColumn(options=OPCJE) for osoba in OSOBY},
     use_container_width=True,
-    key="plan_editor"
+    key=f"plan_editor_{st.session_state.editor_key}"
 )
 
-if st.button("💾 Zapisz moje wybory"):
+if st.button("💾 Zapisz i odśwież"):
     save_to_sheets(edited_df, db)
+    st.session_state.editor_key += 1 # Wymusza odświeżenie widżetu nowymi danymi
+    st.rerun()
     
 # STATYSTYKI
 if not db.empty:
@@ -126,6 +110,7 @@ if not db.empty:
             color=alt.value("#ff7f0e")
         ).properties(height=300)
         st.altair_chart(chart2, use_container_width=True)
+
 
 
 
