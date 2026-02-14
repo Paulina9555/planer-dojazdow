@@ -30,39 +30,49 @@ dni_tygodnia = [(start_monday + timedelta(days=i)).strftime('%Y-%m-%d (%A)') for
 # ODCZYT I ZAPIS GOOGLE SHEETS
 def load_data():
     try:
-        # KLUCZOWA POPRAWKA: allow_redirects=True jest niezbędne dla doGet
-        response = requests.get(APPS_SCRIPT_URL, allow_redirects=True, timeout=10)
+        # Dodajemy parametr 'nocache', aby wymusić na Google Apps Script świeże dane
+        url = f"{APPS_SCRIPT_URL}?nocache={datetime.now().timestamp()}"
+        response = requests.get(url, allow_redirects=True, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            if not data or len(data) == 0:
+            if not data:
                 return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
             
             df = pd.DataFrame(data)
-            # Standaryzacja nazw kolumn (usuwanie spacji i ujednolicenie wielkości liter)
             df.columns = df.columns.str.strip()
+            # Ważne: usuwamy duplikaty, zostawiając ostatni wpis dla danej osoby w danym dniu
+            df = df.drop_duplicates(subset=['Data_Week', 'Dzien', 'Osoba'], keep='last')
             return df
     except Exception as e:
         st.error(f"Błąd połączenia z bazą: {e}")
     return pd.DataFrame(columns=["Data_Week", "Dzien", "Osoba", "Wybor"])
 
-def save_to_sheets(edited_df, full_db): # Funkcja musi być TUTAJ
+def save_to_sheets(edited_df, full_db):
     try:
+        # Przygotowanie nowych danych z edytora
         temp_df = edited_df.reset_index().rename(columns={'index': 'Dzien'})
         new_entries = temp_df.melt(id_vars=['Dzien'], var_name='Osoba', value_name='Wybor')
         new_entries['Data_Week'] = start_monday_str
         
+        # Łączymy stare dane z nowymi
         if not full_db.empty:
-            full_db = full_db[full_db['Data_Week'] != start_monday_str]
-        
-        updated_db = pd.concat([full_db, new_entries], ignore_index=True)
+            # Usuwamy z bazy stare wpisy dla BIEŻĄCEGO tygodnia, by zastąpić je nowymi
+            updated_db = full_db[full_db['Data_Week'] != start_monday_str].copy()
+            updated_db = pd.concat([updated_db, new_entries], ignore_index=True)
+        else:
+            updated_db = new_entries
+
         json_payload = json.dumps(updated_db.to_dict(orient='records'))
         
+        # Wysłanie danych
         response = requests.post(APPS_SCRIPT_URL, data=json_payload, allow_redirects=True)
         if response.status_code == 200:
-            st.success("✅ Zapisano!")
+            st.success("✅ Dane zapisane w Google Sheets!")
+            # Czyścimy cache i wymuszamy odświeżenie
+            st.cache_data.clear()
             st.rerun()
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Błąd zapisu: {e}")
 
 # --- POCZĄTEK LOGIKI INTERFEJSU ---
 db = load_data()
@@ -129,6 +139,7 @@ if not db.empty:
             color=alt.value("#ff7f0e")
         ).properties(height=300)
         st.altair_chart(chart2, use_container_width=True)
+
 
 
 
