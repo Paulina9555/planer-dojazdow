@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -10,80 +9,48 @@ st.title("🚗 Planer Dojazdów")
 OSOBY = ["Błażej", "Krzysztof", "Magda", "Norbert", "Paulina", "Przemek"]
 OPCJE = ["?", "kierowca", "pasażer", "nie jadę"]
 
-# --- FUNKCJA DATY ---
+# --- GENEROWANIE DAT ---
 def get_current_week_dates():
     today = datetime.now()
-    # Jeśli jest sobota (5) lub niedziela (6), celujemy w przyszły tydzień
-    # W pozostałe dni pokazujemy obecny tydzień roboczy
-    if today.weekday() >= 5:
-        start_monday = today + timedelta(days=(7 - today.weekday()))
-    else:
-        start_monday = today - timedelta(days=today.weekday())
-    
+    # Jeśli sobota/niedziela -> następny tydzień, inaczej obecny
+    start_day = today + timedelta(days=(7-today.weekday())) if today.weekday() >= 5 else today - timedelta(days=today.weekday())
     dni = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek"]
-    return [f"{dni[i]} ({(start_monday + timedelta(days=i)).strftime('%d.%m')})" for i in range(5)]
+    return [f"{dni[i]} ({(start_day + timedelta(days=i)).strftime('%d.%m')})" for i in range(5)]
 
 DNI_TYGODNIA = get_current_week_dates()
 
-# --- POŁĄCZENIE I ŁADOWANIE DANYCH ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- PROSTA OBSŁUGA DANYCH (Public CSV) ---
+# Używamy triku z exportem do CSV, który nie wymaga logowania
+SHEET_URL = st.secrets["gsheets"]["spreadsheet"]
+CSV_URL = SHEET_URL.replace("/edit#gid=", "/export?format=csv&gid=")
 
 def load_data():
     try:
-        # Odczyt danych z Google Sheets
-        existing_data = conn.read(ttl=0)
-        
-        # Jeśli arkusz jest pusty lub ma błąd odczytu (np. same 'Unnamed')
-        if existing_data.empty or "Unnamed: 0" in existing_data.columns:
-            raise ValueError("Arkusz jest pusty")
-            
-        # Ustawiamy pierwszą kolumnę jako indeks (daty)
-        existing_data.set_index(existing_data.columns[0], inplace=True)
-        return existing_data
-    except Exception:
-        # TWORZENIE NOWEJ TABELI, gdy arkusz jest pusty
-        new_df = pd.DataFrame("?", index=DNI_TYGODNIA, columns=OSOBY)
-        return new_df
+        # Odczytujemy dane bezpośrednio z linku CSV
+        return pd.read_csv(CSV_URL, index_col=0)
+    except:
+        return pd.DataFrame("?", index=DNI_TYGODNIA, columns=OSOBY)
 
-# Ładujemy dane
+# --- WYŚWIETLANIE ---
 df = load_data()
 
-# --- POPRAWKA WYŚWIETLANIA ---
-# Streamlit czasami gubi nazwy indeksu przy eksporcie, wymuszamy je:
-df.index.name = "Dzień (Data)"
+config = {o: st.column_config.SelectboxColumn(o, options=OPCJE, width="medium") for o in OSOBY}
 
-# --- STYLIZACJA ---
+st.write("Wybierz status i kliknij przycisk na dole, aby zapisać.")
+edited_df = st.data_editor(df, column_config=config, use_container_width=True)
+
+# Funkcja kolorowania dla podglądu
 def color_cells(val):
-    if val == "kierowca": return "background-color: #1E90FF; color: white;" # Niebieski
-    if val == "pasażer": return "background-color: #2E8B57; color: white;"  # Zielony
-    if val == "nie jadę": return "background-color: #B22222; color: white;" # Czerwony
-    return "background-color: #808080; color: white;" # Szary dla "?"
+    colors = {"kierowca": "#1E90FF", "pasażer": "#2E8B57", "nie jadę": "#B22222"}
+    return f"background-color: {colors.get(val, '#808080')}; color: white;"
 
-# --- EDYCJA ---
-st.write("Kliknij w komórkę, aby zmienić status. Zmiany zostaną zapisane dla wszystkich.")
+if st.button("Zapisz zmiany"):
+    # UWAGA: Bez plików JSON zapisywanie bezpośrednio ze Streamlit jest trudne.
+    # Wyświetlę instrukcję, jeśli zapis się nie powiedzie.
+    st.info("Aby zapisać zmiany na stałe bez plików JSON, musisz udostępnić arkusz jako 'Edytor' dla każdego.")
+    # Tutaj możesz dodać link do arkusza, żeby użytkownik mógł go otworzyć i tam wpisać
+    st.markdown(f"[KLIKNIJ TUTAJ, ABY OTWORZYĆ ARKUSZ I ZAPISAĆ]({SHEET_URL})")
 
-config = {
-    osoba: st.column_config.SelectboxColumn(osoba, options=OPCJE, width="medium") 
-    for osoba in OSOBY
-}
-
-# Wyświetlanie edytora
-edited_df = st.data_editor(
-    df,
-    column_config=config,
-    use_container_width=True,
-    key="planer_editor",
-    num_rows="fixed" # Blokuje usuwanie/dodawanie wierszy przez użytkowników
-)
-# --- ZAPIS ---
-if st.button("Zapisz zmiany i odśwież u innych"):
-    conn.update(data=edited_df)
-    st.success("Zapisano pomyślnie!")
-    st.rerun()
-
-# --- WIDOK TYLKO DO ODCZYTU ZE STYLAMI ---
 st.markdown("---")
 st.subheader("Aktualny podgląd (kolory):")
-styled_df = edited_df.style.applymap(color_cells)
-st.table(styled_df)
-
+st.table(edited_df.style.applymap(color_cells))
