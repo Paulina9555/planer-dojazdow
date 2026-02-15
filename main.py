@@ -1,51 +1,64 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from sqlalchemy import text  # DODAJ TO
 
-# --- KONFIGURACJA ---
-st.set_page_config(page_title="Planer Dojazdów", layout="wide")
-st.title("🚗 Planer Dojazdów")
+# ... (reszta kodu bez zmian do momentu bazy danych) ...
 
-OSOBY = ["Błażej", "Krzysztof", "Magda", "Norbert", "Paulina", "Przemek"]
-OPCJE = ["?", "kierowca", "pasażer", "nie jadę"]
-
-# --- DATY ---
-def get_current_week_dates():
-    today = datetime.now()
-    start_monday = today + timedelta(days=(7-today.weekday())) if today.weekday() >= 5 else today - timedelta(days=today.weekday())
-    dni = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek"]
-    return [f"{dni[i]} ({(start_monday + timedelta(days=i)).strftime('%d.%m')})" for i in range(5)]
-
-DNI = get_current_week_dates()
-
-# --- BAZA DANYCH (st.connection) ---
-# Automatycznie pobiera dane z [connections.postgresql] w Secrets
+# --- BAZA DANYCH ---
 conn = st.connection("postgresql", type="sql")
 
 def init_db():
     with conn.session as s:
-        s.execute('CREATE TABLE IF NOT EXISTS planer (dzien TEXT PRIMARY KEY, dane JSONB);')
+        # Używamy text(), aby SQLAlchemy zaakceptowało surowy SQL
+        s.execute(text('CREATE TABLE IF NOT EXISTS planer (dzien TEXT PRIMARY KEY, dane JSONB);'))
         s.commit()
 
 def load_data():
     try:
+        # Odczyt danych
         df_db = conn.query("SELECT * FROM planer", ttl=0)
-        if df_db.empty:
+        if df_db is None or df_db.empty:
             return pd.DataFrame("?", index=DNI, columns=OSOBY)
         
-        # Przetwarzanie danych z bazy do formatu tabeli
         current_data = {osoba: [] for osoba in OSOBY}
         for d in DNI:
+            # Szukamy wiersza dla konkretnej daty
             row = df_db[df_db['dzien'] == d]
-            saved_vals = row.iloc[0]['dane'] if not row.empty else {}
-            for o in OSOBY:
-                current_data[o].append(saved_vals.get(o, "?"))
+            if not row.empty:
+                # W Pandas dane JSONB mogą być słownikiem lub stringiem
+                saved_vals = row.iloc[0]['dane']
+                if isinstance(saved_vals, str):
+                    import json
+                    saved_vals = json.loads(saved_vals)
+                
+                for o in OSOBY:
+                    current_data[o].append(saved_vals.get(o, "?"))
+            else:
+                for o in OSOBY:
+                    current_data[o].append("?")
         return pd.DataFrame(current_data, index=DNI)
-    except:
+    except Exception as e:
+        # W razie błędu (np. nowa baza) pokazujemy czystą tabelę
         return pd.DataFrame("?", index=DNI, columns=OSOBY)
 
 init_db()
 df = load_data()
+
+# --- EDYCJA I ZAPIS ---
+config = {o: st.column_config.SelectboxColumn(o, options=OPCJE, width="medium") for o in OSOBY}
+edited_df = st.data_editor(df, column_config=config, use_container_width=True)
+
+if st.button("Zapisz zmiany dla wszystkich"):
+    with conn.session as s:
+        for index, row in edited_df.iterrows():
+            json_val = row.to_json()
+            # Tutaj również używamy text() i parametrów z dwukropkiem
+            query = text('INSERT INTO planer (dzien, dane) VALUES (:d, :j) ON CONFLICT (dzien) DO UPDATE SET dane = :j')
+            s.execute(query, {"d": index, "j": json_val})
+        s.commit()
+    st.success("Zapisano pomyślnie!")
+    st.rerun()
 
 # --- EDYCJA I KOLORY ---
 config = {o: st.column_config.SelectboxColumn(o, options=OPCJE, width="medium") for o in OSOBY}
@@ -69,3 +82,4 @@ def color_cells(val):
 
 st.markdown("---")
 st.table(edited_df.style.applymap(color_cells))
+
