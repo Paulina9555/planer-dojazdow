@@ -25,19 +25,32 @@ def get_current_week_dates():
 
 DNI_TYGODNIA = get_current_week_dates()
 
-# --- POŁĄCZENIE Z BAZĄ (Google Sheets) ---
+# --- POŁĄCZENIE I ŁADOWANIE DANYCH ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     try:
-        # Próba odczytu istniejących danych
-        return conn.read(ttl=0)
-    except:
-        # Jeśli arkusz pusty, stwórz szkielet
-        df = pd.DataFrame("?", index=DNI_TYGODNIA, columns=OSOBY)
-        return df
+        # Odczyt danych z Google Sheets
+        existing_data = conn.read(ttl=0)
+        
+        # Jeśli arkusz jest pusty lub ma błąd odczytu (np. same 'Unnamed')
+        if existing_data.empty or "Unnamed: 0" in existing_data.columns:
+            raise ValueError("Arkusz jest pusty")
+            
+        # Ustawiamy pierwszą kolumnę jako indeks (daty)
+        existing_data.set_index(existing_data.columns[0], inplace=True)
+        return existing_data
+    except Exception:
+        # TWORZENIE NOWEJ TABELI, gdy arkusz jest pusty
+        new_df = pd.DataFrame("?", index=DNI_TYGODNIA, columns=OSOBY)
+        return new_df
 
+# Ładujemy dane
 df = load_data()
+
+# --- POPRAWKA WYŚWIETLANIA ---
+# Streamlit czasami gubi nazwy indeksu przy eksporcie, wymuszamy je:
+df.index.name = "Dzień (Data)"
 
 # --- STYLIZACJA ---
 def color_cells(val):
@@ -59,9 +72,9 @@ edited_df = st.data_editor(
     df,
     column_config=config,
     use_container_width=True,
-    key="planer_editor"
+    key="planer_editor",
+    num_rows="fixed" # Blokuje usuwanie/dodawanie wierszy przez użytkowników
 )
-
 # --- ZAPIS ---
 if st.button("Zapisz zmiany i odśwież u innych"):
     conn.update(data=edited_df)
@@ -73,3 +86,4 @@ st.markdown("---")
 st.subheader("Aktualny podgląd (kolory):")
 styled_df = edited_df.style.applymap(color_cells)
 st.table(styled_df)
+
