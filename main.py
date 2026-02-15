@@ -69,5 +69,3 @@ def color_cells(val):
 
 st.markdown("---")
 st.table(edited_df.style.applymap(color_cells))
-lor_cells))
-
